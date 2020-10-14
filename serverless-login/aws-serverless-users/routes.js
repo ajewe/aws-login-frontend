@@ -1,7 +1,7 @@
 const AWS = require('aws-sdk');
 const express = require('express');
 const uuid = require('uuid');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 // const jwt = require('jsonwebtoken');
 
 const IS_OFFLINE = process.env.NODE_ENV !== 'production';

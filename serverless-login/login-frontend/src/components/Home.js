@@ -4,8 +4,8 @@ import { NewUserSignup } from './auth/NewUserSignup'
 export const Home = () => {
 
   return (
-    <>
-      <NewUserSignup />
-    </>
+    <div>
+      <h1>Home</h1>
+    </div>
   )
 }

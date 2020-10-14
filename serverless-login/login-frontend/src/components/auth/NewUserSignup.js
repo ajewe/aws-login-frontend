@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { useHistory } from 'react-router-dom'
 
 export const NewUserSignup = () => {
+  const history = useHistory()
   const [ newUser, setNewUser ] = useState({
     username: '',
     password: '',
@@ -19,7 +21,24 @@ export const NewUserSignup = () => {
 
   const handleSubmit = e => {
     e.preventDefault();
-    
+    //add new user
+    fetch(`${ process.env.REACT_APP_API_URL }`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        password: newUser.password,
+        username: newUser.username,
+        email: newUser.email,
+        firstName: newUser.firstName,
+        lastName: newUser.lastName
+      })
+    }).then( res => res.json() )
+    .catch( e => {
+      console.log(e)
+    })
+    history.push("/login")
   }
 
   return (
