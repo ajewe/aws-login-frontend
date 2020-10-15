@@ -1,8 +1,7 @@
 const AWS = require('aws-sdk');
 const express = require('express');
-const uuid = require('uuid');
 const bcrypt = require('bcryptjs');
-// const jwt = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 
 const IS_OFFLINE = process.env.NODE_ENV !== 'production';
 const USERS_TABLE = process.env.TABLE;
@@ -30,13 +29,48 @@ router.get('/users', (req, res) => {
   });
 });
 
+//create a session
+router.post('/session', (req, res) => {
+  const { username, password } = req.body
+  const params = {
+    TableName: USERS_TABLE,
+    KeyConditionExpression: "username = :username",
+    ExpressionAttributeValues: {
+      ":username": username
+    }
+  };
+
+  dynamoDb.query(params, (error, result) => {
+    if (error) {
+      res.status(400).json({ error: 'Error retrieving user', error})
+    }
+    if (result.Items) {
+      const hash = result.Items[0].hash
+      bcrypt.compare(password, hash)
+      .then(compareResult => {
+        if (!compareResult) return res.status(400).send('Unauthorized');
+
+        // user authenticated, create / send token back
+        const timestamp = new Date().getTime();
+        const data = { ...result.Items[0] };
+        data.hash = 'REDACTED';
+        const userObj = { userId: data.id, iat: timestamp };
+        const token = jwt.sign(userObj, 'shh');
+        res.json({ token: token, username: data.username })
+      })
+    } else {
+      res.status(404).json({ error: `User not found` });
+    }
+  })
+});
+
 router.get('/users/:id', (req, res) => {
-  const id = req.params.id;
+  const username = req.params.id;
 
   const params = {
     TableName: USERS_TABLE,
     Key: {
-      id
+      username
     }
   };
 
@@ -55,14 +89,12 @@ router.get('/users/:id', (req, res) => {
 const saltRounds = 10;
 
 router.post('/users', (req, res) => {
-  const id = uuid.v4();
   const { username, password, email, firstName, lastName } = req.body;
 
   bcrypt.hash(password, saltRounds, (err, hash) => {
     const params = {
       TableName: USERS_TABLE,
       Item: {
-        id,
         username,
         hash,
         email,
@@ -76,26 +108,23 @@ router.post('/users', (req, res) => {
         res.status(400).json({ error: 'Could not create user' });
       }
       res.json({
-        id,
         username,
-        password,
+        hash,
         email,
         firstName,
         lastName
       });
     });
   })
-
-
 });
 
 router.delete('/users/:id', (req, res) => {
-  const id = req.params.id;
+  const username = req.params.id;
 
   const params = {
     TableName: USERS_TABLE,
     Key: {
-      id
+      username
     }
   };
 
@@ -108,31 +137,31 @@ router.delete('/users/:id', (req, res) => {
 });
 
 router.put('/users', (req, res) => {
-  const id = req.body.id;
   const { username, password, email, firstName, lastName } = req.body;
 
-  const params = {
-    TableName: USERS_TABLE,
-    Key: {
-      id
-    },
-    UpdateExpression: 'set username = :username, password = :password, email = :email, firstName = :firstName, lastName = :lastName',
-    ExpressionAttributeValues: { 
-      ':username': username,
-      ':password': password,
-      ':email': email,
-      ':firstName': firstName,
-      ':lastName': lastName
-    },
-    ReturnValues: "ALL_NEW"
-  }
-
-  dynamoDb.update(params, (error, result) => {
-    if (error) {
-      res.status(400).json({ error: 'Could not update user' });
+  bcrypt.hash(password, saltRounds, (err, hash) => {
+    const params = {
+      TableName: USERS_TABLE,
+      Key: {
+        username
+      },
+      UpdateExpression: 'set hash = :hash, email = :email, firstName = :firstName, lastName = :lastName',
+      ExpressionAttributeValues: { 
+        ':hash': hash,
+        ':email': email,
+        ':firstName': firstName,
+        ':lastName': lastName
+      },
+      ReturnValues: "ALL_NEW"
     }
-    res.json(result.Attributes);
-  });
+
+    dynamoDb.update(params, (error, result) => {
+      if (error) {
+        res.status(400).json({ error: 'Could not update user' });
+      }
+      res.json(result.Attributes);
+    });
+  })
 });
 
 module.exports = router;
