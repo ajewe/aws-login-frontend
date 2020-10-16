@@ -2,6 +2,7 @@ const AWS = require('aws-sdk');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+// const { authMiddleware } = require('./middleware/auth');
 
 const IS_OFFLINE = process.env.NODE_ENV !== 'production';
 const USERS_TABLE = process.env.TABLE;
@@ -16,19 +17,6 @@ const dynamoDb = IS_OFFLINE === true ?
 
 const router = express.Router();
 
-router.get('/users', (req, res) => {
-  const params = {
-      TableName: USERS_TABLE
-  };
-
-  dynamoDb.scan(params, (error, result) => {
-      if (error) {
-          res.status(400).json({ error: 'Error fetching the users' });
-      }
-      res.json(result.Items);
-  });
-});
-
 //create a session
 router.post('/session', (req, res) => {
   const { username, password } = req.body
@@ -42,28 +30,62 @@ router.post('/session', (req, res) => {
 
   dynamoDb.query(params, (error, result) => {
     if (error) {
-      res.status(400).json({ error: 'Error retrieving user', error})
+      res.json({ error: 'Error retrieving user', error})
     }
     if (result.Items) {
-      const hash = result.Items[0].hash
+      const hash = result.Items[0].password_hash
       bcrypt.compare(password, hash)
       .then(compareResult => {
-        if (!compareResult) return res.status(400).send('Unauthorized');
+        if (!compareResult) return res.send('Unauthorized');
 
         // user authenticated, create / send token back
         const timestamp = new Date().getTime();
         const data = { ...result.Items[0] };
-        data.hash = 'REDACTED';
-        const userObj = { userId: data.id, iat: timestamp };
+        data.password_hash = 'REDACTED';
+        const userObj = { username: data.username, iat: timestamp };
         const token = jwt.sign(userObj, 'shh');
         res.json({ token: token, username: data.username })
       })
     } else {
-      res.status(404).json({ error: `User not found` });
+      res.json({ error: `User not found` });
     }
   })
 });
 
+//create a new user
+const saltRounds = 10;
+
+router.post('/users', (req, res) => {
+  const { username, password, email, firstName, lastName } = req.body;
+
+  bcrypt.hash(password, saltRounds, (err, hash) => {
+    const params = {
+      TableName: USERS_TABLE,
+      Item: {
+        username,
+        password_hash: hash,
+        email,
+        firstName,
+        lastName
+      },
+    };
+
+    dynamoDb.put(params, (error) => {
+      if (error) {
+        res.json({ error: 'Could not create user' });
+      }
+      res.json({
+        username,
+        password_hash: hash,
+        email,
+        firstName,
+        lastName
+      });
+    });
+  })
+});
+
+//TODO implement auth middleware to get user data
 router.get('/users/:id', (req, res) => {
   const username = req.params.id;
 
@@ -76,48 +98,17 @@ router.get('/users/:id', (req, res) => {
 
   dynamoDb.get(params, (error, result) => {
     if (error) {
-      res.status(400).json({ error: 'Error retrieving user'})
+      res.json({ error: 'Error retrieving user'})
     }
     if (result.Item) {
       res.json(result.Item);
     } else {
-      res.status(404).json({ error: `User not found` });
+      res.json({ error: `User not found` });
     }
   });
 });
 
-const saltRounds = 10;
-
-router.post('/users', (req, res) => {
-  const { username, password, email, firstName, lastName } = req.body;
-
-  bcrypt.hash(password, saltRounds, (err, hash) => {
-    const params = {
-      TableName: USERS_TABLE,
-      Item: {
-        username,
-        hash,
-        email,
-        firstName,
-        lastName
-      },
-    };
-
-    dynamoDb.put(params, (error) => {
-      if (error) {
-        res.status(400).json({ error: 'Could not create user' });
-      }
-      res.json({
-        username,
-        hash,
-        email,
-        firstName,
-        lastName
-      });
-    });
-  })
-});
-
+//TODO auth middleware
 router.delete('/users/:id', (req, res) => {
   const username = req.params.id;
 
@@ -130,37 +121,43 @@ router.delete('/users/:id', (req, res) => {
 
   dynamoDb.delete(params, (error) => {
     if (error) {
-      res.status(400).json({ error: 'Could not delete user' });
+      res.json({ error: 'Could not delete user' });
     }
     res.json({ success: true });
   });
 });
 
+//TODO fix this route it's not working, also auth middleware
 router.put('/users', (req, res) => {
   const { username, password, email, firstName, lastName } = req.body;
 
   bcrypt.hash(password, saltRounds, (err, hash) => {
-    const params = {
-      TableName: USERS_TABLE,
-      Key: {
-        username
-      },
-      UpdateExpression: 'set hash = :hash, email = :email, firstName = :firstName, lastName = :lastName',
-      ExpressionAttributeValues: { 
-        ':hash': hash,
-        ':email': email,
-        ':firstName': firstName,
-        ':lastName': lastName
-      },
-      ReturnValues: "ALL_NEW"
-    }
-
-    dynamoDb.update(params, (error, result) => {
-      if (error) {
-        res.status(400).json({ error: 'Could not update user' });
+    try {
+      const params = {
+        TableName: USERS_TABLE,
+        Key: {
+          username
+        },
+        UpdateExpression: 'set password_hash = :h, email = :e, firstName = :fn, lastName = :ln',
+        ExpressionAttributeValues: { 
+          ':h': hash,
+          ':e': email,
+          ':fn': firstName,
+          ':ln': lastName
+        },
+        ReturnValues: "ALL_NEW"
       }
-      res.json(result.Attributes);
-    });
+
+      dynamoDb.update(params, (error, result) => {
+        if (error) {
+          res.json({ error: 'Could not update user', error });
+        } else {
+          res.json({updated: result});
+        }
+      });
+    } catch(e) {
+      res.json({e});
+    }
   })
 });
 
